@@ -1,0 +1,150 @@
+#!/usr/bin/env node
+'use strict';
+
+var REGISTRY_URL = 'https://index.docker.io/v1/';
+var DOCKER_CFG_PATH = getUserHome() + '/.dockercfg';
+var TMP_DIR = '.tmp-eb-docker-deployer';
+var DOCKERRUN_FILE = 'Dockerrun.aws.json';
+
+require('shelljs/global');
+
+var _              = require('underscore');
+var Q              = require('q');
+var program        = require('commander');
+var fs             = require('fs');
+var readline       = require('readline');
+var RegistryClient = require('../lib/client.js');
+var pkg            = require('../package.json');
+
+program
+  .version(pkg.version)
+  .usage('[docker image] [tag - optional]')
+  .description('Example: eb-docker-deployer docker/java:java-oracle8')
+  .option('-y, --y', 'Just do it')
+  .parse(process.argv);
+
+validateEnv();
+
+var dockerImage = program.args[0];
+var dockerImageTag = program.args[1];
+var dockerCfg = readDockerConfig();
+var client = createClient();
+
+if(!dockerImageTag) {
+  client.getTags(dockerImage).then(function(res) {
+    chooseRow('Choose version:', _.pluck(res, 'name'))
+      .then(function(tag) { 
+        deploy(dockerImage, tag); 
+      })
+      .catch(abort);
+  });
+} else {
+  deploy(dockerImage, dockerImageTag);
+}
+
+function validateEnv() {
+  validateFilePresence('.elasticbeanstalk', 'Error: Missing configuration for elastic beanstalk');
+  validateFilePresence('Dockerrun.aws.json', 'Error: Missing eb docker configuration file');
+  validateFilePresence(DOCKER_CFG_PATH, 'Error: Missing .dockercfg');
+
+  if(program.args.length < 1) {
+    abort('Missing required arguments, use argument -h for help');
+  }
+}
+
+function confirm(msg, callback) {
+  var rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+
+  rl.question(msg, function (input) {
+    rl.close();
+    callback(/^y|yes|ok|true$/i.test(input));
+  });
+}
+
+function chooseRow(msg, rows) {
+  var deferred = Q.defer();
+
+  var rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+
+  var rowsWithNum = _.map(rows, function(row, i) {
+    return ++i + ': ' + row;
+  });
+
+  msg = '\n' + msg + '\n' + rowsWithNum.join('\n') + '\n-> ';
+
+  rl.question(msg, function (input) {
+    var selectedRow = parseInt(input);
+
+    if(selectedRow > rows.length || selectedRow < 1) {
+      rl.close();
+      deferred.reject('Invalid choice');
+    } else {
+      rl.close();
+      deferred.resolve(rows[--selectedRow]);
+    }
+  });
+
+  return deferred.promise;
+}
+
+function createClient() {
+  return new RegistryClient({
+    url: REGISTRY_URL,
+    authToken: dockerCfg[REGISTRY_URL].auth
+  });
+}
+
+function abort(str) {
+  console.error(str);
+  process.exit(1);
+}
+
+function getUserHome() {
+  return process.env.HOME || process.env.HOMEPATH || process.env.USERPROFILE;
+}
+
+function readDockerConfig() {
+  var data = fs.readFileSync(DOCKER_CFG_PATH, 'utf8');
+  return JSON.parse(data);
+}
+
+function deploy(repo, tag) {
+  console.log('Deploying tag', tag);
+
+  // Let the hack start :)
+  // 1. Create temp working dir
+  // 2. Copy all necessary files needed for AWS EB CLI 
+  // 3. Alter Dockerrun.aws.json to set tag
+  // 4. Invoke the EB commmand 
+
+  exec('rm -rf ' + TMP_DIR);
+  exec('mkdir ' + TMP_DIR);
+  exec('cp -R .elasticbeanstalk ' + TMP_DIR);
+  exec('cp -R ' + DOCKERRUN_FILE + ' ' + TMP_DIR);
+  
+  process.chdir(TMP_DIR);
+  
+  changeDockerRunRepo(DOCKERRUN_FILE, repo, tag);
+  
+  exec('eb deploy -v');
+}
+
+function validateFilePresence(file, errMsg) {
+  if(!fs.existsSync(file)) {
+    abort(errMsg + ' (missing file ' + file + ')');
+    return false;
+  }
+  return true;
+}
+
+function changeDockerRunRepo(filename, repo, tag) {  
+  var content = JSON.parse(fs.readFileSync(filename));
+  content.Image.Name = repo + ':' + tag;
+  fs.writeFileSync(filename, JSON.stringify(content));
+}

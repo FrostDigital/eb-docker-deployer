@@ -1,0 +1,16 @@
+{
+  "name": "eb-docker-deployer",
+  "version": "0.0.1",
+  "description": "Utility for deploying a docker image to AWS Elastic Beanstalk",
+  "main": "bin/eb-docker-deployer",
+  "author": "Joel Söderström <joel@frostdigital.se>",
+  "license": "ISC",
+  "dependencies": {
+    "restify": "^2.8.4",
+    "commander": "^2.6.0",
+    "readline": "0.0.5",
+    "underscore": "^1.7.0",
+    "shelljs": "^0.3.0",
+    "q": "^1.1.2"
+  }
+}
