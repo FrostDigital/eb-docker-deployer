@@ -5,6 +5,9 @@
   "main": "bin/eb-docker-deployer",
   "author": "Joel Söderström <joel@frostdigital.se>",
   "license": "ISC",
+  "bin": {
+    "eb-docker-deployer": "./bin/eb-docker-deployer"
+  },
   "dependencies": {
     "restify": "^2.8.4",
     "commander": "^2.6.0",
